@@ -132,11 +132,25 @@
         <button id="right-btn" class="control-btn">→</button>
     </div>
 
+    <!-- Elementos de audio -->
+    <audio id="waka-sound" src="https://assets.mixkit.co/sfx/preview/mixkit-arcade-game-jump-coin-216.mp3" preload="auto"></audio>
+    <audio id="power-pellet-sound" src="https://assets.mixkit.co/sfx/preview/mixkit-unlock-game-notification-253.mp3" preload="auto"></audio>
+    <audio id="ghost-eaten-sound" src="https://assets.mixkit.co/sfx/preview/mixkit-winning-chimes-2015.mp3" preload="auto"></audio>
+    <audio id="death-sound" src="https://assets.mixkit.co/sfx/preview/mixkit-retro-arcade-lose-2027.mp3" preload="auto"></audio>
+    <audio id="game-start-sound" src="https://assets.mixkit.co/sfx/preview/mixkit-arcade-game-explosion-1699.mp3" preload="auto"></audio>
+
     <script>
         // Configuración del juego
         const canvas = document.getElementById('game-canvas');
         const ctx = canvas.getContext('2d');
         const scoreDisplay = document.getElementById('score-display');
+        
+        // Elementos de audio
+        const wakaSound = document.getElementById('waka-sound');
+        const powerPelletSound = document.getElementById('power-pellet-sound');
+        const ghostEatenSound = document.getElementById('ghost-eaten-sound');
+        const deathSound = document.getElementById('death-sound');
+        const gameStartSound = document.getElementById('game-start-sound');
         
         // Constantes del juego (basadas en tamaño original)
         const ORIGINAL_WIDTH = 448;
@@ -146,6 +160,7 @@
         const GRID_HEIGHT = 31;
         const PELLET_SIZE = 4;
         const POWER_PELLET_SIZE = 8;
+        const FRIGHTENED_DURATION = 500; // 500 frames (~8 segundos)
         
         // Variables de escalado
         let scale = 1;
@@ -157,6 +172,9 @@
         let gameOver = false;
         let pelletsEaten = 0;
         const totalPellets = 244; // Número total de puntos en el mapa original
+        let frightenedMode = false;
+        let frightenedTimer = 0;
+        let ghostMultiplier = 1; // Multiplicador de puntos por comer fantasmas
         
         // Mapa del laberinto (1 = pared, 0 = camino, 2 = punto, 3 = punto grande)
         const maze = [
@@ -172,7 +190,7 @@
             [1,1,1,1,1,1,2,1,1,1,1,1,0,1,1,0,1,1,1,1,1,2,1,1,1,1,1,1],
             [0,0,0,0,0,1,2,1,1,1,1,1,0,1,1,0,1,1,1,1,1,2,1,0,0,0,0,0],
             [0,0,0,0,0,1,2,1,1,0,0,0,0,0,0,0,0,0,0,1,1,2,1,0,0,0,0,0],
-            [0,0,0,0,0,1,2,1,1,0,1,1,1,1,1,1,1,1,0,1,1,2,1,0,0,0,0,0],
+            [0,0,0,0,0,1,2,1,1,0,1,1,0,0,0,0,1,1,0,1,1,2,1,0,0,0,0,0],
             [1,1,1,1,1,1,2,1,1,0,1,0,0,0,0,0,0,1,0,1,1,2,1,1,1,1,1,1],
             [0,0,0,0,0,0,2,0,0,0,1,0,0,0,0,0,0,1,0,0,0,2,0,0,0,0,0,0],
             [1,1,1,1,1,1,2,1,1,0,1,0,0,0,0,0,0,1,0,1,1,2,1,1,1,1,1,1],
@@ -261,6 +279,7 @@
                     score += 10;
                     pelletsEaten++;
                     updateScoreDisplay();
+                    playSound(wakaSound);
                     
                     // Comprobar si se han comido todos los puntos
                     if (pelletsEaten === totalPellets) {
@@ -272,7 +291,8 @@
                     score += 50;
                     pelletsEaten++;
                     updateScoreDisplay();
-                    // Aquí podríamos activar el modo "fantasmas asustados"
+                    activateFrightenedMode();
+                    playSound(powerPelletSound);
                 }
             }
             
@@ -330,20 +350,31 @@
         
         // Clase Fantasma
         class Ghost {
-            constructor(x, y, color) {
+            constructor(x, y, color, name) {
                 this.x = x * TILE_SIZE + TILE_SIZE / 2;
                 this.y = y * TILE_SIZE + TILE_SIZE / 2;
                 this.radius = TILE_SIZE / 2;
                 this.speed = 1;
                 this.direction = { x: 0, y: 0 };
                 this.color = color;
+                this.originalColor = color;
                 this.target = { x: 0, y: 0 };
                 this.mode = 'scatter'; // scatter, chase, frightened
                 this.timer = 0;
+                this.name = name;
+                this.isEaten = false;
+                this.returningHome = false;
+                this.homeX = x * TILE_SIZE + TILE_SIZE / 2;
+                this.homeY = y * TILE_SIZE + TILE_SIZE / 2;
             }
             
             update(pacman) {
-                // Lógica de movimiento simple (podría mejorarse con IA)
+                if (this.isEaten && this.returningHome) {
+                    this.returnToHome();
+                    return;
+                }
+                
+                // Lógica de movimiento según el modo
                 if (this.timer <= 0) {
                     this.changeDirection(pacman);
                     this.timer = Math.floor(Math.random() * 60) + 30;
@@ -368,7 +399,62 @@
             }
             
             changeDirection(pacman) {
-                // Lógica simple de movimiento (podría mejorarse)
+                // Lógica de movimiento según el modo
+                let targetX, targetY;
+                
+                if (frightenedMode && !this.isEaten) {
+                    // Modo asustado - movimiento aleatorio
+                    this.color = '#2121FF'; // Azul
+                    this.speed = 0.5; // Más lento
+                    this.mode = 'frightened';
+                } else if (this.isEaten) {
+                    // Fantasma comido - regresa a casa
+                    this.color = '#FFFFFF'; // Blanco (parpadeante)
+                    this.speed = 2; // Más rápido
+                    targetX = this.homeX;
+                    targetY = this.homeY;
+                    this.returningHome = true;
+                } else {
+                    // Comportamiento normal según el fantasma
+                    this.color = this.originalColor;
+                    this.speed = 1;
+                    
+                    switch (this.name) {
+                        case 'Blinky': // Rojo - persigue directamente
+                            targetX = pacman.x;
+                            targetY = pacman.y;
+                            break;
+                        case 'Pinky': // Rosa - persigue 4 casillas adelante
+                            targetX = pacman.x + pacman.direction.x * TILE_SIZE * 4;
+                            targetY = pacman.y + pacman.direction.y * TILE_SIZE * 4;
+                            break;
+                        case 'Inky': // Cian - comportamiento complejo
+                            // Inky usa la posición de Blinky como referencia
+                            const blinky = ghosts.find(g => g.name === 'Blinky');
+                            const vectorX = pacman.x - blinky.x;
+                            const vectorY = pacman.y - blinky.y;
+                            targetX = pacman.x + vectorX;
+                            targetY = pacman.y + vectorY;
+                            break;
+                        case 'Clyde': // Naranja - persigue pero se aleja si está cerca
+                            const distance = Math.sqrt(
+                                Math.pow(pacman.x - this.x, 2) + 
+                                Math.pow(pacman.y - this.y, 2)
+                            );
+                            if (distance < TILE_SIZE * 8) {
+                                // Se aleja
+                                targetX = 0;
+                                targetY = ORIGINAL_HEIGHT;
+                            } else {
+                                // Persigue
+                                targetX = pacman.x;
+                                targetY = pacman.y;
+                            }
+                            break;
+                    }
+                }
+                
+                // Calcular mejor dirección hacia el objetivo
                 const directions = [
                     { x: 1, y: 0 },  // Derecha
                     { x: -1, y: 0 }, // Izquierda
@@ -392,15 +478,78 @@
                 });
                 
                 if (validDirections.length > 0) {
-                    // Elegir una dirección aleatoria (mejorar con IA)
-                    const randomIndex = Math.floor(Math.random() * validDirections.length);
-                    this.direction = validDirections[randomIndex];
+                    // En modo asustado, elegir dirección aleatoria
+                    if (frightenedMode && !this.isEaten) {
+                        const randomIndex = Math.floor(Math.random() * validDirections.length);
+                        this.direction = validDirections[randomIndex];
+                    } 
+                    // En modo normal, elegir la mejor dirección hacia el objetivo
+                    else {
+                        let bestDir = validDirections[0];
+                        let bestDistance = Infinity;
+                        
+                        for (const dir of validDirections) {
+                            const nextX = this.x + dir.x * this.speed;
+                            const nextY = this.y + dir.y * this.speed;
+                            const distance = Math.sqrt(
+                                Math.pow(targetX - nextX, 2) + 
+                                Math.pow(targetY - nextY, 2)
+                            );
+                            
+                            if (distance < bestDistance) {
+                                bestDistance = distance;
+                                bestDir = dir;
+                            }
+                        }
+                        
+                        this.direction = bestDir;
+                    }
+                }
+            }
+            
+            returnToHome() {
+                // Calcular distancia a casa
+                const dx = this.homeX - this.x;
+                const dy = this.homeY - this.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                // Si ha llegado a casa
+                if (distance < this.speed) {
+                    this.x = this.homeX;
+                    this.y = this.homeY;
+                    this.isEaten = false;
+                    this.returningHome = false;
+                    this.color = this.originalColor;
+                    this.speed = 1;
+                } else {
+                    // Mover hacia casa
+                    const angle = Math.atan2(dy, dx);
+                    this.direction = {
+                        x: Math.cos(angle),
+                        y: Math.sin(angle)
+                    };
+                    
+                    this.x += this.direction.x * this.speed;
+                    this.y += this.direction.y * this.speed;
                 }
             }
             
             draw() {
+                if (this.isEaten && !this.returningHome) return;
+                
                 ctx.save();
-                ctx.fillStyle = this.color;
+                
+                // Fantasmas asustados parpadean cuando el modo está por terminar
+                if (frightenedMode && !this.isEaten && frightenedTimer < 100) {
+                    const blink = Math.floor(frightenedTimer / 10) % 2 === 0;
+                    ctx.fillStyle = blink ? '#2121FF' : '#FFFFFF';
+                } else if (frightenedMode && !this.isEaten) {
+                    ctx.fillStyle = '#2121FF'; // Azul para modo asustado
+                } else if (this.isEaten) {
+                    ctx.fillStyle = '#FFFFFF'; // Blanco para fantasmas comidos
+                } else {
+                    ctx.fillStyle = this.color;
+                }
                 
                 // Cuerpo del fantasma
                 ctx.beginPath();
@@ -434,61 +583,100 @@
                 ctx.closePath();
                 ctx.fill();
                 
-                // Ojos del fantasma
-                const eyeOffsetX = this.radius * 0.3;
-                const eyeOffsetY = this.radius * 0.2;
-                const pupilOffsetX = this.radius * 0.15;
-                const pupilOffsetY = this.radius * 0.1;
-                
-                // Ojo izquierdo
-                ctx.fillStyle = 'white';
-                ctx.beginPath();
-                ctx.arc(
-                    (this.x - eyeOffsetX) * scale, 
-                    (this.y - eyeOffsetY) * scale, 
-                    this.radius * 0.3 * scale, 
-                    0, Math.PI * 2
-                );
-                ctx.fill();
-                
-                // Ojo derecho
-                ctx.beginPath();
-                ctx.arc(
-                    (this.x + eyeOffsetX) * scale, 
-                    (this.y - eyeOffsetY) * scale, 
-                    this.radius * 0.3 * scale, 
-                    0, Math.PI * 2
-                );
-                ctx.fill();
-                
-                // Pupila izquierda
-                ctx.fillStyle = 'blue';
-                ctx.beginPath();
-                ctx.arc(
-                    (this.x - eyeOffsetX + (this.direction.x * pupilOffsetX)) * scale,
-                    (this.y - eyeOffsetY + (this.direction.y * pupilOffsetY)) * scale,
-                    this.radius * 0.15 * scale, 0, Math.PI * 2
-                );
-                ctx.fill();
-                
-                // Pupila derecha
-                ctx.beginPath();
-                ctx.arc(
-                    (this.x + eyeOffsetX + (this.direction.x * pupilOffsetX)) * scale,
-                    (this.y - eyeOffsetY + (this.direction.y * pupilOffsetY)) * scale,
-                    this.radius * 0.15 * scale, 0, Math.PI * 2
-                );
-                ctx.fill();
+                // Ojos del fantasma (no se dibujan si el fantasma fue comido)
+                if (!this.isEaten) {
+                    const eyeOffsetX = this.radius * 0.3;
+                    const eyeOffsetY = this.radius * 0.2;
+                    const pupilOffsetX = this.radius * 0.15;
+                    const pupilOffsetY = this.radius * 0.1;
+                    
+                    // Ojo izquierdo
+                    ctx.fillStyle = 'white';
+                    ctx.beginPath();
+                    ctx.arc(
+                        (this.x - eyeOffsetX) * scale, 
+                        (this.y - eyeOffsetY) * scale, 
+                        this.radius * 0.3 * scale, 
+                        0, Math.PI * 2
+                    );
+                    ctx.fill();
+                    
+                    // Ojo derecho
+                    ctx.beginPath();
+                    ctx.arc(
+                        (this.x + eyeOffsetX) * scale, 
+                        (this.y - eyeOffsetY) * scale, 
+                        this.radius * 0.3 * scale, 
+                        0, Math.PI * 2
+                    );
+                    ctx.fill();
+                    
+                    // Pupila izquierda
+                    ctx.fillStyle = frightenedMode ? '#0000FF' : 'blue';
+                    ctx.beginPath();
+                    ctx.arc(
+                        (this.x - eyeOffsetX + (this.direction.x * pupilOffsetX)) * scale,
+                        (this.y - eyeOffsetY + (this.direction.y * pupilOffsetY)) * scale,
+                        this.radius * 0.15 * scale, 0, Math.PI * 2
+                    );
+                    ctx.fill();
+                    
+                    // Pupila derecha
+                    ctx.beginPath();
+                    ctx.arc(
+                        (this.x + eyeOffsetX + (this.direction.x * pupilOffsetX)) * scale,
+                        (this.y - eyeOffsetY + (this.direction.y * pupilOffsetY)) * scale,
+                        this.radius * 0.15 * scale, 0, Math.PI * 2
+                    );
+                    ctx.fill();
+                }
                 
                 ctx.restore();
             }
             
             checkCollision(pacman) {
+                if (this.isEaten) return false;
+                
                 const dx = (this.x - pacman.x) * scale;
                 const dy = (this.y - pacman.y) * scale;
                 const distance = Math.sqrt(dx * dx + dy * dy);
                 
                 return distance < (this.radius + pacman.radius) * scale;
+            }
+            
+            getEaten() {
+                this.isEaten = true;
+                this.returningHome = false;
+                playSound(ghostEatenSound);
+                
+                // Puntos por comer fantasma (aumentan con cada fantasma comido)
+                score += 200 * ghostMultiplier;
+                ghostMultiplier *= 2;
+                updateScoreDisplay();
+            }
+        }
+        
+        // Activar el modo asustado
+        function activateFrightenedMode() {
+            frightenedMode = true;
+            frightenedTimer = FRIGHTENED_DURATION;
+            ghostMultiplier = 1; // Reiniciar multiplicador
+        }
+        
+        // Actualizar el modo asustado
+        function updateFrightenedMode() {
+            if (frightenedMode) {
+                frightenedTimer--;
+                if (frightenedTimer <= 0) {
+                    frightenedMode = false;
+                    // Restaurar colores y velocidades de los fantasmas
+                    ghosts.forEach(ghost => {
+                        if (!ghost.isEaten) {
+                            ghost.color = ghost.originalColor;
+                            ghost.speed = 1;
+                        }
+                    });
+                }
             }
         }
         
@@ -550,6 +738,11 @@
         // Mostrar fin del juego
         function showGameOver(win = false) {
             const message = win ? '¡Felicidades! Has ganado el juego.' : '¡Game Over!';
+            
+            if (!win) {
+                playSound(deathSound);
+            }
+            
             const restart = confirm(`${message} ¿Quieres jugar de nuevo?`);
             
             if (restart) {
@@ -575,6 +768,9 @@
             score = 0;
             pelletsEaten = 0;
             gameOver = false;
+            frightenedMode = false;
+            frightenedTimer = 0;
+            ghostMultiplier = 1;
             
             // Restablecer personajes
             pacman.reset();
@@ -583,6 +779,10 @@
                 ghost.x = positions[i][0] * TILE_SIZE + TILE_SIZE / 2;
                 ghost.y = positions[i][1] * TILE_SIZE + TILE_SIZE / 2;
                 ghost.direction = { x: 0, y: 0 };
+                ghost.color = ghost.originalColor;
+                ghost.isEaten = false;
+                ghost.returningHome = false;
+                ghost.speed = 1;
             });
             
             updateScoreDisplay();
@@ -591,6 +791,15 @@
             if (!animationId) {
                 gameLoop();
             }
+            
+            // Reproducir sonido de inicio
+            playSound(gameStartSound);
+        }
+        
+        // Reproducir sonido
+        function playSound(sound) {
+            sound.currentTime = 0;
+            sound.play().catch(e => console.log("No se pudo reproducir sonido:", e));
         }
         
         // Escalar el canvas según el tamaño del contenedor
@@ -615,10 +824,10 @@
         // Crear instancias de los personajes
         const pacman = new Pacman();
         const ghosts = [
-            new Ghost(13, 11, '#FF0000'), // Rojo (Blinky)
-            new Ghost(14, 14, '#FFB8FF'), // Rosa (Pinky)
-            new Ghost(13, 14, '#00FFFF'), // Cian (Inky)
-            new Ghost(14, 11, '#FFB852')  // Naranja (Clyde)
+            new Ghost(13, 11, '#FF0000', 'Blinky'), // Rojo (Blinky)
+            new Ghost(14, 14, '#FFB8FF', 'Pinky'), // Rosa (Pinky)
+            new Ghost(13, 14, '#00FFFF', 'Inky'), // Cian (Inky)
+            new Ghost(14, 11, '#FFB852', 'Clyde')  // Naranja (Clyde)
         ];
         
         // Control del teclado
@@ -667,14 +876,22 @@
                 pacman.update();
                 pacman.draw();
                 
+                updateFrightenedMode();
+                
                 ghosts.forEach(ghost => {
                     ghost.update(pacman);
                     ghost.draw();
                     
                     // Comprobar colisión con Pac-Man
                     if (ghost.checkCollision(pacman)) {
-                        gameOver = true;
-                        showGameOver();
+                        if (frightenedMode && !ghost.isEaten) {
+                            // Pac-Man se come al fantasma
+                            ghost.getEaten();
+                        } else if (!ghost.isEaten) {
+                            // Fantasma mata a Pac-Man
+                            gameOver = true;
+                            showGameOver();
+                        }
                     }
                 });
                 
@@ -686,6 +903,7 @@
         
         // Iniciar el juego
         gameLoop();
+        playSound(gameStartSound);
     </script>
 </body>
 </html>
