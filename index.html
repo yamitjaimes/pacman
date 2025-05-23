@@ -133,12 +133,26 @@
     </div>
 
     <!-- Elementos de audio -->
-    <audio id="waka-sound" src="https://assets.mixkit.co/sfx/preview/mixkit-arcade-game-jump-coin-216.mp3" preload="auto"></audio>
-    <audio id="power-pellet-sound" src="https://assets.mixkit.co/sfx/preview/mixkit-unlock-game-notification-253.mp3" preload="auto"></audio>
-    <audio id="ghost-eaten-sound" src="https://assets.mixkit.co/sfx/preview/mixkit-winning-chimes-2015.mp3" preload="auto"></audio>
-    <audio id="death-sound" src="https://assets.mixkit.co/sfx/preview/mixkit-retro-arcade-lose-2027.mp3" preload="auto"></audio>
-    <audio id="game-start-sound" src="https://assets.mixkit.co/sfx/preview/mixkit-arcade-game-explosion-1699.mp3" preload="auto"></audio>
+    <audio id="waka-sound" preload="auto">
+    <source src="sounds/waka.mp3" type="audio/mpeg">
+    Tu navegador no soporta el elemento de audio.
+</audio>
 
+<audio id="power-pellet-sound" preload="auto">
+    <source src="sounds/power-pellet.mp3" type="audio/mpeg">
+</audio>
+
+<audio id="ghost-eaten-sound" preload="auto">
+    <source src="sounds/ghost-eaten.mp3" type="audio/mpeg">
+</audio>
+
+<audio id="death-sound" preload="auto">
+    <source src="sounds/death.mp3" type="audio/mpeg">
+</audio>
+
+<audio id="game-start-sound" preload="auto">
+    <source src="sounds/game-start.mp3" type="audio/mpeg">
+</audio>
     <script>
         // Configuración del juego
         const canvas = document.getElementById('game-canvas');
@@ -904,6 +918,8 @@
         // Iniciar el juego
         gameLoop();
         playSound(gameStartSound);
+
+        
     </script>
 </body>
 </html>
